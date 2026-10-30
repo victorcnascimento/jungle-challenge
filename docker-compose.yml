@@ -1,0 +1,102 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jungle-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jungle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jungle_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-jungle_wagering}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jungle} -d ${POSTGRES_DB:-jungle_wagering}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: jungle-localstack
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      EAGER_SERVICE_LOADING: 1
+    ports:
+      - "${LOCALSTACK_PORT:-4566}:4566"
+    volumes:
+      - ./docker/localstack/init-sqs.sh:/etc/localstack/init/ready.d/init-sqs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "awslocal sqs list-queues | grep wager-transactions.fifo"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  app-1:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      INSTANCE_ID: app-1
+      DATABASE_URL: postgresql://jungle:jungle_secret@postgres:5432/jungle_wagering
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_WAGER_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
+      SQS_WAGER_DLQ_URL: http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      SQS_EVENTS_QUEUE_URL: http://localstack:4566/000000000000/domain-integration-events.fifo
+      AUTO_MIGRATE: "true"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  app-2:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      INSTANCE_ID: app-2
+      DATABASE_URL: postgresql://jungle:jungle_secret@postgres:5432/jungle_wagering
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_WAGER_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
+      SQS_WAGER_DLQ_URL: http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      SQS_EVENTS_QUEUE_URL: http://localstack:4566/000000000000/domain-integration-events.fifo
+      AUTO_MIGRATE: "false"
+    ports:
+      - "3001:3001"
+    depends_on:
+      app-1:
+        condition: service_started
+
+  app-3:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      INSTANCE_ID: app-3
+      DATABASE_URL: postgresql://jungle:jungle_secret@postgres:5432/jungle_wagering
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_WAGER_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
+      SQS_WAGER_DLQ_URL: http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      SQS_EVENTS_QUEUE_URL: http://localstack:4566/000000000000/domain-integration-events.fifo
+      AUTO_MIGRATE: "false"
+    ports:
+      - "3002:3002"
+    depends_on:
+      app-1:
+        condition: service_started
+
+volumes:
+  pgdata:
